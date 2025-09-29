@@ -85,6 +85,22 @@ x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 with torch.no_grad():
     with ctx:
         for k in range(num_samples):
-            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            y, top_probs, top_indices = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            
+            # print the generated text
             print(decode(y[0].tolist()))
+            
+            # top_probs and top_indices have shape (batch_size, vocab_size)
+            # here, batch_size is top_probs.size(0)
+            batch_size = top_probs.size(0)
+            
+            for b in range(batch_size):  # loop over batch if > 1
+                print(f"\nBatch {b} - Top 10 tokens:")
+                # get top 10 tokens for this batch
+                top10_probs, top10_indices = torch.topk(top_probs[b], k=10)
+                
+                for rank, (token_id, prob) in enumerate(zip(top10_indices.tolist(), top10_probs.tolist()), start=1):
+                    token_str = decode([token_id])  # use your existing decode function
+                    print(f"{rank}. Token ID {token_id} ('{token_str}') (prob={prob:.4f})")
+            
             print('---------------')
