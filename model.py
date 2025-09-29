@@ -327,7 +327,8 @@ class GPT(nn.Module):
             for b in range(probs.size(0)):  # loop over batch if > 1
                 print(f"\nBatch {b} - Top 10 tokens:")
                 for rank, (token_id, prob) in enumerate(zip(top_indices[b].tolist(), top_probs[b].tolist            ()), start=1):
-                    print(f"{rank}. Token {token_id} (prob={prob:.4f})")
+                    token_str = tokenizer.decode([token_id])  # <-- this converts ID to word/piece
+                    print(f"{rank}. Token ID {token_id} ('{token_str}') (prob={prob:.4f})")
             # sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1)
             # append sampled index to the running sequence and continue
