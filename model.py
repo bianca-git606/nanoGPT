@@ -323,7 +323,7 @@ class GPT(nn.Module):
             # apply softmax to convert logits to (normalized) probabilities
             probs = F.softmax(logits, dim=-1)
             # --- print top 10 most likely tokens ---
-            top_probs, top_indices = torch.topk(probs, k=10, dim=-1)
+            top_probs, top_indices = torch.topk(probs, k=20, dim=-1)
             # sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1)
             # append sampled index to the running sequence and continue
