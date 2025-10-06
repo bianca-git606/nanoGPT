@@ -1,0 +1,10 @@
+[{
+    "prompt": "My dog's name is ",
+    "response": "Fluffy"
+  }, {
+    "prompt": "What's the capital of ",
+    "response": "France"
+  },{
+    "prompt": "Please get me a ",
+    "response": "cup of coffee"
+}]

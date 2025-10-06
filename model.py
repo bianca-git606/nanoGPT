@@ -14,6 +14,12 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import matplotlib.pyplot as plt
+import tiktoken
+
+enc = tiktoken.get_encoding("gpt2")
+encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
+decode = lambda l: enc.decode(l)
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -302,14 +308,43 @@ class GPT(nn.Module):
         mfu = flops_achieved / flops_promised
         return mfu
 
+    def show_probs(self, chosen_token, top_ten_tokens, top_10_probs):
+        """
+        Plots a bar chart of the top 10 tokens with their probabilities.
+        Highlights the chosen token in red.
+        """
+        # Assign colors (highlight chosen token)
+        colors = ['red' if word == chosen_token else 'blue'  for   word in top_ten_tokens]
+        # Create bar chart
+        plt.figure(figsize=(10, 5))
+        plt.bar(top_ten_tokens, top_10_probs, color=colors)
+        plt.xlabel("Tokens")
+        plt.ylabel("Probability")
+        plt.title("Top 10 Predicted Tokens")
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        plt.show()
+    
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, show_probs=False, fixed_response=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
-        for _ in range(max_new_tokens):
+        # initialize total_log_prob to track the log probabilities of the generated tokens
+        total_log_prob = torch.zeros(idx.size(0), device=idx.device)
+        total_probs_fixed_response = torch.zeros(idx.size(0), device=idx.device)
+
+        if type(fixed_response) is not type(str()):
+            new_tokens_length = len(fixed_response.squeeze(0).tolist())
+        else:
+            new_tokens_length = max_new_tokens
+
+        for _ in range(new_tokens_length):
+            
+            num_of_iter = _ # will be used to index into fixed_response if provided
+
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
             # forward the model to get the logits for the index in the sequence
@@ -322,11 +357,46 @@ class GPT(nn.Module):
                 logits[logits < v[:, [-1]]] = -float('Inf')
             # apply softmax to convert logits to (normalized) probabilities
             probs = F.softmax(logits, dim=-1)
-            # --- print top 10 most likely tokens ---
-            top_probs, top_indices = torch.topk(probs, k=20, dim=-1)
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
-            # append sampled index to the running sequence and continue
+            
+            if type(fixed_response) is not type(str()):
+                fixed_response = fixed_response.squeeze(0)  # convert to list of token IDs
+                chosen_token = fixed_response[num_of_iter]  # assign the current token as the chosen token
+                chosen_token_probs = probs[0, chosen_token] # probability of that token
+                total_log_prob += torch.log(chosen_token_probs + 1e-12) # + 1e-12 safeguards against zero-probabilities
+                total_probs_fixed_response += chosen_token_probs
+
+                # prepare the chosen token as a tensor so that it can be appended to the sequence
+                idx_next = torch.tensor([[chosen_token]], device=idx.device)
+            else:
+                # sample from the distribution
+                idx_next = torch.multinomial(probs, num_samples=1)
+                # get the chosen token probabilities
+                chosen_token_probs = torch.gather(probs, -1, idx_next)  # shape (b, 1)
+                total_log_prob += torch.log(chosen_token_probs.squeeze(-1))
+                total_probs_fixed_response += chosen_token_probs.squeeze(-1)
+            
+            idx_next_str = decode([idx_next.item()])  # convert to string for printing
+            print(f"Chosen token: {idx_next_str}, Probability: {chosen_token_probs.item():.10f}")
+
+            if show_probs:
+                # get top 10 tokens and their probabilities
+                top_10_probs, top_10_indices = torch.topk(probs, k=10, dim=-1)
+                print("Top 10 tokens and their probabilities:")
+                # decode top_10_indices to strings
+                top_ten_tokens = [decode([token_id]) for token_id in top_10_indices[0].tolist()]
+                # output the top tokens and their probabilities
+                for token, prob in zip(top_ten_tokens, top_10_probs[0].tolist()):
+                    print(f"Token: '{token}', Probability: {prob:.4f}")
+
+                self.show_probs(idx_next_str, top_ten_tokens, top_10_probs[0].tolist())
+
+            # append sampled index OR the current index in the fixed_response to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
 
-        return idx, top_probs, top_indices
+        # convert accumulated log probability back to probability
+        sequence_prob = torch.exp(total_log_prob)
+        # print sequence_prob and the generated sequence
+        print(f"Generated sequence: {decode(idx[0].tolist())}")
+        print(f"Sequence probability: {sequence_prob.item():.10f}")
+
+        return total_probs_fixed_response

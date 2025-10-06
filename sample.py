@@ -7,6 +7,7 @@ from contextlib import nullcontext
 import torch
 import tiktoken
 from model import GPTConfig, GPT
+import matplotlib.pyplot as plt
 
 # -----------------------------------------------------------------------------
 init_from = 'resume' # either 'resume' (from an out_dir) or a gpt2 variant (e.g. 'gpt2-xl')
@@ -21,6 +22,7 @@ device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', etc.
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32' or 'bfloat16' or 'float16'
 compile = False # use PyTorch 2.0 to compile the model to be faster
 show_probs = False
+fixed_response = ''
 exec(open('configurator.py').read()) # overrides from command line or config file
 # -----------------------------------------------------------------------------
 
@@ -81,26 +83,17 @@ if start.startswith('FILE:'):
 start_ids = encode(start)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
+if len(fixed_response) > 0:
+    fixed_response_ids = encode(fixed_response)
+    fixed_response = (torch.tensor(fixed_response_ids, dtype=torch.long, device=device)[None, ...])
+
 # run generation
 with torch.no_grad():
     with ctx:
         for k in range(num_samples):
-            y, top_probs, top_indices = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
-            
-            # print the generated text
-            print(decode(y[0].tolist()))
-            
-            # top_probs and top_indices have shape (batch_size, vocab_size)
-            # here, batch_size is top_probs.size(0)
-            batch_size = top_probs.size(0)
-            
-            for b in range(batch_size):  # loop over batch if > 1
-                print(f"\nBatch {b} - Top 10 tokens:")
-                # get top 10 tokens for this batch
-                top10_probs, top10_indices = torch.topk(top_probs[b], k=10)
-                
-                for rank, (token_id, prob) in enumerate(zip(top10_indices.tolist(), top10_probs.tolist()), start=1):
-                    token_str = decode([token_id])  # use your existing decode function
-                    print(f"{rank}. Token ID {token_id} ('{token_str}') (prob={prob:.4f})")
-            
-            print('---------------')
+            if type(fixed_response) is not type(str()):
+                print(f"With the start input of: '{decode(x[0].tolist())}' and a fixed response of: '{decode    (fixed_response[0].tolist())}'")
+
+            summed_response_probs = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k, show_probs=show_probs, fixed_response=fixed_response)
+
+            print(f"Summed probabilities of the fixed response: {summed_response_probs}")
